@@ -94,6 +94,8 @@ jobs:
             patchelf file \
             libgl1-mesa-dev \
             libxkbcommon-x11-0 \
+            libx11-dev libxext-dev libxt-dev \
+            libxaw7-dev libxmu-dev \
             libxcb-cursor0 \
             libssl-dev \
             wget curl
