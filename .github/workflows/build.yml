@@ -76,7 +76,7 @@ jobs:
       - name: Install Dependencies (macOS)
         if: matrix.platform == 'macos'
         run: |
-          brew install cmake ninja
+          brew install cmake ninja boost
 
       - name: Install Dependencies (Windows)
         if: matrix.platform == 'windows'
@@ -96,6 +96,7 @@ jobs:
             libxkbcommon-x11-0 \
             libxcb-cursor0 \
             libssl-dev \
+            libboost-dev \
             wget curl
 
       # -------------------------
@@ -133,21 +134,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path "lib" | Out-Null
           Copy-Item -Force -Path "build\libgit2*.lib" -Destination "lib\"
 
-      
-      - name: Setup Boost headers (macOS/Linux)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          cd ..
-          wget -q https://github.com/boostorg/boost/releases/download/boost-${BOOST_VERSION}/boost_1_85_0.tar.bz2
-          tar xjf boost_1_85_0.tar.bz2
-
       - name: Setup Boost headers (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           cd ..
-          $url = "https://github.com/boostorg/boost/releases/download/boost-${env:BOOST_VERSION}/boost_1_85_0.zip"
+          $url = "https://sourceforge.net/projects/boost/files/boost/1.85.0/boost_1_85_0.zip/download"
           Invoke-WebRequest -Uri $url -OutFile "boost.zip"
           Expand-Archive -Path "boost.zip" -DestinationPath "."
 
