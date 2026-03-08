@@ -144,7 +144,7 @@ jobs:
           cd ..
           NG=ngspice-42
           if [ ! -d "$NG" ]; then
-            curl -L -o ngspice-42.tar.gz https://sourceforge.net/projects/ngspice/files/ng-spice-rework/42/ngspice-42.tar.gz/download
+            curl -L -o ngspice-42.tar.gz https://sourceforge.net/projects/ngspice/files/ng-spice-rework/old-releases/42/ngspice-42.tar.gz/download
             tar xzf ngspice-42.tar.gz
           fi
 
