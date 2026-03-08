@@ -1,0 +1,309 @@
+name: Build & Release (macOS, Windows, Linux AppImage)
+
+on:
+  push:
+    branches: [ develop ]
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.5.3"
+  LIBGIT2_VERSION: "1.7.1"
+  BOOST_VERSION: "1.85.0"
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            runs_on: macos-13
+          - platform: windows
+            runs_on: windows-2022
+          - platform: linux-appimage
+            runs_on: ubuntu-20.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # -------------------------
+      # Qt
+      # -------------------------
+      - name: Install Qt (macOS)
+        if: matrix.platform == 'macos'
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: mac
+          target: desktop
+          arch: clang_64
+          cache: true
+
+      - name: Install Qt (Windows)
+        if: matrix.platform == 'windows'
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2019_64
+          cache: true
+
+      - name: Install Qt (Linux)
+        if: matrix.platform == 'linux-appimage'
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: gcc_64
+          cache: true
+
+      # -------------------------
+      # Tooling deps
+      # -------------------------
+      - name: Install Dependencies (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          brew install cmake ninja
+
+      - name: Install Dependencies (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          choco install -y ninja cmake 7zip
+
+      - name: Install Dependencies (Linux)
+        if: matrix.platform == 'linux-appimage'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake ninja-build \
+            patchelf file \
+            libgl1-mesa-dev \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libssl-dev \
+            wget curl
+
+      # -------------------------
+      # Third-party source deps (libgit2 + boost headers)
+      # (Matches the approach used in the macOS workflow patch seen for this repo.)
+      # -------------------------
+      - name: Setup libgit2 (macOS/Linux)
+        if: matrix.platform != 'windows'
+        run: |
+          cd ..
+          wget -q https://github.com/libgit2/libgit2/archive/v${LIBGIT2_VERSION}.tar.gz
+          tar xzf v${LIBGIT2_VERSION}.tar.gz
+          cd libgit2-${LIBGIT2_VERSION}
+          mkdir -p build && cd build
+          cmake -G Ninja -D BUILD_SHARED_LIBS=OFF -D CMAKE_BUILD_TYPE=Release ..
+          cmake --build . --config Release
+          cd ..
+          mkdir -p lib
+          cp build/libgit2.a lib/ || cp build/libgit2*.a lib/ || true
+
+      - name: Setup libgit2 (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          cd ..
+          $v = "${env:LIBGIT2_VERSION}"
+          Invoke-WebRequest -Uri "https://github.com/libgit2/libgit2/archive/refs/tags/v$($v).zip" -OutFile "libgit2.zip"
+          Expand-Archive -Path "libgit2.zip" -DestinationPath "."
+          cd "libgit2-$($v)"
+          mkdir build
+          cd build
+          cmake -G "Ninja" -D BUILD_SHARED_LIBS=OFF -D CMAKE_BUILD_TYPE=Release ..
+          cmake --build . --config Release
+          cd ..
+          New-Item -ItemType Directory -Force -Path "lib" | Out-Null
+          Copy-Item -Force -Path "build\libgit2*.lib" -Destination "lib\"
+
+      - name: Setup Boost headers
+        run: |
+          cd ..
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            exit 0
+          fi
+          wget -q https://github.com/boostorg/boost/releases/download/boost-${BOOST_VERSION}/boost_1_85_0.tar.bz2
+          tar xjf boost_1_85_0.tar.bz2
+
+      - name: Setup Boost headers (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          cd ..
+          $url = "https://github.com/boostorg/boost/releases/download/boost-${env:BOOST_VERSION}/boost_1_85_0.zip"
+          Invoke-WebRequest -Uri $url -OutFile "boost.zip"
+          Expand-Archive -Path "boost.zip" -DestinationPath "."
+
+      # -------------------------
+      # Build
+      # -------------------------
+      - name: Build (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          qmake phoenix.pro
+          make -j"$(sysctl -n hw.ncpu)" release
+
+      - name: Build (Linux)
+        if: matrix.platform == 'linux-appimage'
+        run: |
+          qmake phoenix.pro
+          make -j"$(nproc)" release
+
+      - name: Build (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          qmake phoenix.pro
+          # Use jom if available; fall back to nmake
+          if (Get-Command jom -ErrorAction SilentlyContinue) {
+            jom release
+          } else {
+            nmake release
+          }
+
+      # -------------------------
+      # Package: macOS (DMG)
+      # -------------------------
+      - name: Package (macOS DMG)
+        if: matrix.platform == 'macos'
+        run: |
+          APP_BUNDLE="../release64/Fritzing.app"
+          CONTENTS_DIR="$APP_BUNDLE/Contents"
+          MACOS_DIR="$CONTENTS_DIR/MacOS"
+
+          # Copy resources into bundle
+          cp -rf sketches help translations INSTALL.txt README.md LICENSE.CC-BY-SA LICENSE.GPL2 LICENSE.GPL3 "$MACOS_DIR/" || true
+
+          # Clean translations
+          rm -f "$MACOS_DIR/translations/"*.ts || true
+          find "$MACOS_DIR/translations" -name "*.qm" -size -128c -delete || true
+
+          # Clone parts and generate parts db (pattern used by the macOS workflow patch)
+          git clone --depth 1 --branch master https://github.com/fritzing/fritzing-parts.git fritzing-parts
+          "$MACOS_DIR/Fritzing" -db "fritzing-parts/parts.db" || true
+
+          macdeployqt "$APP_BUNDLE" -dmg -verbose=1
+
+          mkdir -p dist
+          cp -f ../release64/Fritzing.dmg "dist/Fritzing-macOS.dmg"
+
+      # -------------------------
+      # Package: Windows (ZIP)
+      # -------------------------
+      - name: Package (Windows ZIP)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          # Try to locate the built EXE (common output: ..\release64\Fritzing.exe)
+          $exe = Get-ChildItem -Path .. -Recurse -Filter "Fritzing.exe" -ErrorAction SilentlyContinue |
+                 Where-Object { $_.FullName -match "release" } |
+                 Select-Object -First 1
+
+          if (-not $exe) { throw "Could not find Fritzing.exe in expected output folders." }
+
+          $stage = Join-Path $PWD "dist\Fritzing"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Force $exe.FullName $stage
+
+          # Copy runtime resources (best-effort)
+          foreach ($p in @("sketches","help","translations","INSTALL.txt","README.md","LICENSE.CC-BY-SA","LICENSE.GPL2","LICENSE.GPL3")) {
+            if (Test-Path $p) { Copy-Item -Recurse -Force $p $stage }
+          }
+
+          # Bundle Qt deps
+          & windeployqt (Join-Path $stage "Fritzing.exe") --release --compiler-runtime
+
+          # Optional: bundle parts database generation could be added here if desired.
+
+          Compress-Archive -Path "$stage\*" -DestinationPath "dist\Fritzing-windows.zip" -Force
+
+      # -------------------------
+      # Package: Linux AppImage
+      # -------------------------
+      - name: Package (Linux AppImage)
+        if: matrix.platform == 'linux-appimage'
+        run: |
+          set -euxo pipefail
+
+          mkdir -p dist AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+
+          # Locate the built binary (common output: ../release64/Fritzing)
+          BIN="$(find .. -type f -name Fritzing -perm -111 | head -n 1)"
+          test -n "$BIN"
+          cp -f "$BIN" AppDir/usr/bin/Fritzing
+
+          # Desktop + icon from repo (these exist in fritzing-app)
+          cp -f org.fritzing.Fritzing.desktop AppDir/usr/share/applications/
+          # Try a few likely icon names; keep best-effort
+          if [ -f "resources/images/fritzing_icon.png" ]; then
+            cp -f resources/images/fritzing_icon.png AppDir/usr/share/icons/hicolor/256x256/apps/org.fritzing.Fritzing.png
+          elif [ -f "resources/images/fritzing_icon_256.png" ]; then
+            cp -f resources/images/fritzing_icon_256.png AppDir/usr/share/icons/hicolor/256x256/apps/org.fritzing.Fritzing.png
+          fi
+
+          # Copy runtime resources into AppDir (best-effort)
+          for p in sketches help translations INSTALL.txt README.md LICENSE.CC-BY-SA LICENSE.GPL2 LICENSE.GPL3; do
+            [ -e "$p" ] && cp -rf "$p" AppDir/usr/bin/ || true
+          done
+
+          # linuxdeploy + Qt plugin
+          curl -L -o linuxdeploy.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -L -o linuxdeploy-plugin-qt.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
+
+          export QML_SOURCES_PATHS="$PWD"
+          export VERSION="${GITHUB_REF_NAME:-dev}"
+
+          ./linuxdeploy.AppImage \
+            --appdir AppDir \
+            --desktop-file AppDir/usr/share/applications/org.fritzing.Fritzing.desktop \
+            --executable AppDir/usr/bin/Fritzing \
+            --plugin qt \
+            --output appimage
+
+          # linuxdeploy outputs *.AppImage in CWD
+          OUT="$(ls -1 ./*.AppImage | head -n 1)"
+          cp -f "$OUT" "dist/Fritzing-linux-x86_64.AppImage"
+
+      # -------------------------
+      # Upload build artifacts (all events)
+      # -------------------------
+      - name: Upload Artifact (macOS)
+        if: matrix.platform == 'macos'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fritzing-macOS
+          path: dist/Fritzing-macOS.dmg
+
+      - name: Upload Artifact (Windows)
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fritzing-windows
+          path: dist/Fritzing-windows.zip
+
+      - name: Upload Artifact (Linux AppImage)
+        if: matrix.platform == 'linux-appimage'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fritzing-linux-appimage
+          path: dist/Fritzing-linux-x86_64.AppImage
