@@ -133,17 +133,17 @@ jobs:
           New-Item -ItemType Directory -Force -Path "lib" | Out-Null
           Copy-Item -Force -Path "build\libgit2*.lib" -Destination "lib\"
 
-      - name: Setup Boost headers
+      
+      - name: Setup Boost headers (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
           cd ..
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            exit 0
-          fi
           wget -q https://github.com/boostorg/boost/releases/download/boost-${BOOST_VERSION}/boost_1_85_0.tar.bz2
           tar xjf boost_1_85_0.tar.bz2
 
       - name: Setup Boost headers (Windows)
-        if: matrix.platform == 'windows'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           cd ..
