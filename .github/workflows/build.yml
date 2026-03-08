@@ -29,7 +29,7 @@ jobs:
           - platform: windows
             runs_on: windows-2022
           - platform: linux-appimage
-            runs_on: ubuntu-20.04
+            runs_on: ubuntu-22.04
 
     steps:
       - name: Checkout
