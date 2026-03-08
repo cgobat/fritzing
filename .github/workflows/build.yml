@@ -133,6 +133,26 @@ jobs:
           New-Item -ItemType Directory -Force -Path "lib" | Out-Null
           Copy-Item -Force -Path "build\libgit2*.lib" -Destination "lib\"
 
+      - name: Build ngspice 42 (Linux)
+        if: matrix.platform == 'linux-appimage'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y bison flex gperf libtool autoconf automake gettext
+
+          cd ..
+          NG=ngspice-42
+          if [ ! -d "$NG" ]; then
+            curl -L -o ngspice-42.tar.gz https://sourceforge.net/projects/ngspice/files/ng-spice-rework/42/ngspice-42.tar.gz/download
+            tar xzf ngspice-42.tar.gz
+          fi
+
+          cd "$NG"
+          # Fritzing typically wants shared libs available for packaging
+          ./configure --with-readline=no --disable-debug --enable-xspice --enable-cider --enable-openmp --enable-shared
+          make -j"$(nproc)"
+
       - name: Setup Boost (Mac/Linux)
         if: runner.os != 'Windows'
         shell: bash
