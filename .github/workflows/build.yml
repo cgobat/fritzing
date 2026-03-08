@@ -76,7 +76,7 @@ jobs:
       - name: Install Dependencies (macOS)
         if: matrix.platform == 'macos'
         run: |
-          brew install cmake ninja boost
+          brew install cmake ninja
 
       - name: Install Dependencies (Windows)
         if: matrix.platform == 'windows'
@@ -96,7 +96,6 @@ jobs:
             libxkbcommon-x11-0 \
             libxcb-cursor0 \
             libssl-dev \
-            libboost-dev \
             wget curl
 
       # -------------------------
@@ -134,14 +133,32 @@ jobs:
           New-Item -ItemType Directory -Force -Path "lib" | Out-Null
           Copy-Item -Force -Path "build\libgit2*.lib" -Destination "lib\"
 
-      - name: Setup Boost headers (Windows)
+      - name: Setup Boost (Mac/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd ..
+          rm -rf boost_1_85_0 boost-1.85.0
+          curl -L -o boost-cmake.tar.gz \
+            https://github.com/boostorg/boost/releases/download/boost-1.85.0/boost-1.85.0-cmake.tar.gz
+          tar xzf boost-cmake.tar.gz
+          mv boost-1.85.0 boost_1_85_0
+
+      - name: Setup Boost (place at ../boost_1_85_0)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
           cd ..
-          $url = "https://sourceforge.net/projects/boost/files/boost/1.85.0/boost_1_85_0.zip/download"
-          Invoke-WebRequest -Uri $url -OutFile "boost.zip"
-          Expand-Archive -Path "boost.zip" -DestinationPath "."
+          if (Test-Path "boost_1_85_0") { Remove-Item -Recurse -Force "boost_1_85_0" }
+          if (Test-Path "boost-1.85.0") { Remove-Item -Recurse -Force "boost-1.85.0" }
+
+          $url = "https://github.com/boostorg/boost/releases/download/boost-1.85.0/boost-1.85.0-cmake.zip"
+          Invoke-WebRequest -Uri $url -OutFile "boost-cmake.zip"
+          Expand-Archive -Path "boost-cmake.zip" -DestinationPath "."
+          Rename-Item -Path "boost-1.85.0" -NewName "boost_1_85_0"
 
       - name: Compute build naming vars
         id: vars
