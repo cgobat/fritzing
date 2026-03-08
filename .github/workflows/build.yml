@@ -82,7 +82,7 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          choco install -y ninja cmake 7zip
+          choco install -y ninja cmake 7zip wix
 
       - name: Install Dependencies (Linux)
         if: matrix.platform == 'linux-appimage'
@@ -143,6 +143,32 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile "boost.zip"
           Expand-Archive -Path "boost.zip" -DestinationPath "."
 
+      - name: Compute build naming vars
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # version from tag vX.Y.Z -> X.Y.Z, else 0.0.0
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            ver="${GITHUB_REF_NAME#v}"
+          else
+            ver="0.0.0"
+          fi
+
+          sha7="${GITHUB_SHA:0:7}"
+
+          # qt flavor naming: windows gets qt6_win64, others qt6
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            qtflavor="qt6_win64"
+          else
+            qtflavor="qt6"
+          fi
+
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+          echo "sha7=$sha7" >> "$GITHUB_OUTPUT"
+          echo "qtflavor=$qtflavor" >> "$GITHUB_OUTPUT"
+
       # -------------------------
       # Build
       # -------------------------
@@ -194,39 +220,129 @@ jobs:
           macdeployqt "$APP_BUNDLE" -dmg -verbose=1
 
           mkdir -p dist
-          cp -f ../release64/Fritzing.dmg "dist/Fritzing-macOS.dmg"
+          out="fritzing-${{ steps.vars.outputs.ver }}-autobuild-${{ steps.vars.outputs.sha7 }}-${{ steps.vars.outputs.qtflavor }}.dmg"
+          cp -f ../release64/Fritzing.dmg "dist/$out"
 
       # -------------------------
-      # Package: Windows (ZIP)
+      # Package: Windows (MSI)
       # -------------------------
-      - name: Package (Windows ZIP)
+      - name: Package (Windows MSI)
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
           New-Item -ItemType Directory -Force -Path dist | Out-Null
 
-          # Try to locate the built EXE (common output: ..\release64\Fritzing.exe)
+          # Locate built EXE (adjust if your output path differs)
           $exe = Get-ChildItem -Path .. -Recurse -Filter "Fritzing.exe" -ErrorAction SilentlyContinue |
                  Where-Object { $_.FullName -match "release" } |
                  Select-Object -First 1
-
           if (-not $exe) { throw "Could not find Fritzing.exe in expected output folders." }
 
-          $stage = Join-Path $PWD "dist\Fritzing"
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item -Force $exe.FullName $stage
+          # Stage install root
+          $stageRoot = Join-Path $PWD "dist\stage"
+          $appDir    = Join-Path $stageRoot "Fritzing"
+          New-Item -ItemType Directory -Force -Path $appDir | Out-Null
+          Copy-Item -Force $exe.FullName (Join-Path $appDir "Fritzing.exe")
 
           # Copy runtime resources (best-effort)
           foreach ($p in @("sketches","help","translations","INSTALL.txt","README.md","LICENSE.CC-BY-SA","LICENSE.GPL2","LICENSE.GPL3")) {
-            if (Test-Path $p) { Copy-Item -Recurse -Force $p $stage }
+            if (Test-Path $p) { Copy-Item -Recurse -Force $p $appDir }
           }
 
-          # Bundle Qt deps
-          & windeployqt (Join-Path $stage "Fritzing.exe") --release --compiler-runtime
+          # Bundle Qt deps into staged folder
+          & windeployqt (Join-Path $appDir "Fritzing.exe") --release --compiler-runtime
 
-          # Optional: bundle parts database generation could be added here if desired.
+          # ---- Build MSI via WiX v3 (heat + candle + light) ----
+          $wixBin = "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin"
+          if (!(Test-Path $wixBin)) { throw "WiX bin folder not found at $wixBin" }
 
-          Compress-Archive -Path "$stage\*" -DestinationPath "dist\Fritzing-windows.zip" -Force
+          $heat   = Join-Path $wixBin "heat.exe"
+          $candle = Join-Path $wixBin "candle.exe"
+          $light  = Join-Path $wixBin "light.exe"
+
+          $verRaw = "${{ steps.vars.outputs.ver }}"
+          # MSI version must be numeric a.b.c[.d]. Use first 3 numeric components; fallback 0.0.0
+          $parts = ($verRaw -split '[^0-9]+') | Where-Object { $_ -ne "" }
+          if ($parts.Count -lt 3) { $msiVer = "0.0.0" } else { $msiVer = "$($parts[0]).$($parts[1]).$($parts[2])" }
+
+          # Deterministic-ish UpgradeCode (stable across builds for this repo). Replace if you prefer your own GUID.
+          $upgradeCode = "D6C0B2E3-6F6E-4E6E-9A7F-3E1F79D5A0A1"
+
+          $wxsHarvest = Join-Path $PWD "dist\harvest.wxs"
+          & $heat dir $appDir `
+            -nologo `
+            -cg FritzingFiles `
+            -dr INSTALLFOLDER `
+            -gg `
+            -srd `
+            -sreg `
+            -sfrag `
+            -var var.SourceDir `
+            -out $wxsHarvest
+
+          $wxsMain = Join-Path $PWD "dist\product.wxs"
+
+          @"
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="Fritzing"
+    Language="1033"
+    Version="$msiVer"
+    Manufacturer="Fritzing"
+    UpgradeCode="$upgradeCode">
+
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Fritzing is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="ProductFeature" Title="Fritzing" Level="1">
+      <ComponentGroupRef Id="FritzingFiles" />
+    </Feature>
+
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="Fritzing" />
+      </Directory>
+    </Directory>
+
+    <!-- Optional: start menu shortcut -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="AppShortcut" Guid="*">
+        <Shortcut
+          Id="StartMenuShortcut"
+          Directory="ProgramMenuFolder"
+          Name="Fritzing"
+          WorkingDirectory="INSTALLFOLDER"
+          Target="[INSTALLFOLDER]Fritzing.exe"/>
+        <RemoveFolder Id="RemoveProgramMenuDir" Directory="ProgramMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\Fritzing" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Shortcuts" Title="Shortcuts" Level="1">
+      <ComponentRef Id="AppShortcut" />
+    </Feature>
+
+  </Product>
+</Wix>
+"@ | Set-Content -Encoding UTF8 $wxsMain
+
+          $objMain = Join-Path $PWD "dist\product.wixobj"
+          $objHarv = Join-Path $PWD "dist\harvest.wixobj"
+
+          & $candle -nologo -dSourceDir="$appDir" -out (Join-Path $PWD "dist\") $wxsMain $wxsHarvest
+          & $light  -nologo -sval -ext WixUIExtension -out (Join-Path $PWD "dist\Fritzing.msi") $objMain $objHarv
+
+          $outName = "fritzing-${{ steps.vars.outputs.ver }}-autobuild-${{ steps.vars.outputs.sha7 }}-${{ steps.vars.outputs.qtflavor }}.msi"
+          Copy-Item -Force (Join-Path $PWD "dist\Fritzing.msi") (Join-Path $PWD "dist\$outName")
 
       # -------------------------
       # Package: Linux AppImage
@@ -274,7 +390,8 @@ jobs:
 
           # linuxdeploy outputs *.AppImage in CWD
           OUT="$(ls -1 ./*.AppImage | head -n 1)"
-          cp -f "$OUT" "dist/Fritzing-linux-x86_64.AppImage"
+          out="fritzing-${{ steps.vars.outputs.ver }}-autobuild-${{ steps.vars.outputs.sha7 }}-${{ steps.vars.outputs.qtflavor }}.AppImage"
+          cp -f "$OUT" "dist/$out"
 
       # -------------------------
       # Upload build artifacts (all events)
@@ -283,19 +400,19 @@ jobs:
         if: matrix.platform == 'macos'
         uses: actions/upload-artifact@v4
         with:
-          name: Fritzing-macOS
-          path: dist/Fritzing-macOS.dmg
+          name: macOS-DMG
+          path: dist/fritzing-*.dmg
 
-      - name: Upload Artifact (Windows)
+      - name: Upload Artifact (Windows MSI)
         if: matrix.platform == 'windows'
         uses: actions/upload-artifact@v4
         with:
-          name: Fritzing-windows
-          path: dist/Fritzing-windows.zip
+          name: Windows-MSI
+          path: dist/fritzing-*.msi
 
       - name: Upload Artifact (Linux AppImage)
         if: matrix.platform == 'linux-appimage'
         uses: actions/upload-artifact@v4
         with:
-          name: Fritzing-linux-appimage
-          path: dist/Fritzing-linux-x86_64.AppImage
+          name: Linux-AppImage
+          path: dist/fritzing-*.AppImage
