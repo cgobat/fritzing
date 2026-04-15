@@ -17,19 +17,9 @@ env:
   BOOST_VERSION: "1.85.0"
 
 jobs:
-  build:
-    name: Build (${{ matrix.platform }})
-    runs-on: ${{ matrix.runs_on }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos
-            runs_on: macos-latest
-          - platform: windows
-            runs_on: windows-2022
-          - platform: linux-appimage
-            runs_on: ubuntu-22.04
+  build-appimage:
+    name: Build Linux AppImage
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
@@ -37,32 +27,8 @@ jobs:
         with:
           submodules: recursive
 
-      # -------------------------
-      # Qt
-      # -------------------------
-      - name: Install Qt (macOS)
-        if: matrix.platform == 'macos'
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: ${{ env.QT_VERSION }}
-          host: mac
-          target: desktop
-          arch: clang_64
-          cache: true
-
-      - name: Install Qt (Windows)
-        if: matrix.platform == 'windows'
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: ${{ env.QT_VERSION }}
-          host: windows
-          target: desktop
-          arch: win64_msvc2019_64
-          cache: true
-
-      - name: Install Qt (Linux)
-        if: matrix.platform == 'linux-appimage'
-        uses: jurplel/install-qt-action@v3
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           host: linux
@@ -70,340 +36,224 @@ jobs:
           arch: gcc_64
           cache: true
 
-      # -------------------------
-      # Tooling deps
-      # -------------------------
-      - name: Install Dependencies (macOS)
-        if: matrix.platform == 'macos'
-        run: |
-          brew install cmake ninja
-
-      - name: Install Dependencies (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          choco install -y ninja cmake 7zip wix
-
-      - name: Install Dependencies (Linux)
-        if: matrix.platform == 'linux-appimage'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            cmake ninja-build \
-            patchelf file \
-            libgl1-mesa-dev \
-            libxkbcommon-x11-0 \
-            libx11-dev libxext-dev libxt-dev \
-            libxaw7-dev libxmu-dev \
-            libxcb-cursor0 \
-            libssl-dev \
-            wget curl
-
-      # -------------------------
-      # Third-party source deps (libgit2 + boost headers)
-      # (Matches the approach used in the macOS workflow patch seen for this repo.)
-      # -------------------------
-      - name: Setup libgit2 (macOS/Linux)
-        if: matrix.platform != 'windows'
-        run: |
-          cd ..
-          wget -q https://github.com/libgit2/libgit2/archive/v${LIBGIT2_VERSION}.tar.gz
-          tar xzf v${LIBGIT2_VERSION}.tar.gz
-          cd libgit2-${LIBGIT2_VERSION}
-          mkdir -p build && cd build
-          cmake -G Ninja -D BUILD_SHARED_LIBS=OFF -D CMAKE_BUILD_TYPE=Release ..
-          cmake --build . --config Release
-          cd ..
-          mkdir -p lib
-          cp build/libgit2.a lib/ || cp build/libgit2*.a lib/ || true
-
-      - name: Setup libgit2 (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          cd ..
-          $v = "${env:LIBGIT2_VERSION}"
-          Invoke-WebRequest -Uri "https://github.com/libgit2/libgit2/archive/refs/tags/v$($v).zip" -OutFile "libgit2.zip"
-          Expand-Archive -Path "libgit2.zip" -DestinationPath "."
-          cd "libgit2-$($v)"
-          mkdir build
-          cd build
-          cmake -G "Ninja" -D BUILD_SHARED_LIBS=OFF -D CMAKE_BUILD_TYPE=Release ..
-          cmake --build . --config Release
-          cd ..
-          New-Item -ItemType Directory -Force -Path "lib" | Out-Null
-          Copy-Item -Force -Path "build\libgit2*.lib" -Destination "lib\"
-
-      - name: Build ngspice 42 (Linux)
-        if: matrix.platform == 'linux-appimage'
-        shell: bash
-        run: |
-          set -euxo pipefail
-          sudo apt-get update
-          sudo apt-get install -y bison flex gperf libtool autoconf automake gettext
-
-          cd ..
-          NG=ngspice-42
-          if [ ! -d "$NG" ]; then
-            curl -L -o ngspice-42.tar.gz https://sourceforge.net/projects/ngspice/files/ng-spice-rework/old-releases/42/ngspice-42.tar.gz/download
-            tar xzf ngspice-42.tar.gz
-          fi
-
-          cd "$NG"
-          # Fritzing typically wants shared libs available for packaging
-          ./configure --with-readline=no --disable-debug --enable-xspice --enable-cider --enable-openmp --enable-shared
-          make -j"$(nproc)"
-
-      - name: Setup Boost (Mac/Linux)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cd ..
-          rm -rf boost_1_85_0 boost-1.85.0
-          curl -L -o boost-cmake.tar.gz \
-            https://github.com/boostorg/boost/releases/download/boost-1.85.0/boost-1.85.0-cmake.tar.gz
-          tar xzf boost-cmake.tar.gz
-          mv boost-1.85.0 boost_1_85_0
-
-      - name: Setup Boost (place at ../boost_1_85_0)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          cd ..
-          if (Test-Path "boost_1_85_0") { Remove-Item -Recurse -Force "boost_1_85_0" }
-          if (Test-Path "boost-1.85.0") { Remove-Item -Recurse -Force "boost-1.85.0" }
-
-          $url = "https://github.com/boostorg/boost/releases/download/boost-1.85.0/boost-1.85.0-cmake.zip"
-          Invoke-WebRequest -Uri $url -OutFile "boost-cmake.zip"
-          Expand-Archive -Path "boost-cmake.zip" -DestinationPath "."
-          Rename-Item -Path "boost-1.85.0" -NewName "boost_1_85_0"
-
-      - name: Compute build naming vars
+      - name: Compute artifact naming vars
         id: vars
         shell: bash
         run: |
           set -euo pipefail
-
-          # version from tag vX.Y.Z -> X.Y.Z, else 0.0.0
           if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
             ver="${GITHUB_REF_NAME#v}"
           else
             ver="0.0.0"
           fi
-
           sha7="${GITHUB_SHA:0:7}"
-
-          # qt flavor naming: windows gets qt6_win64, others qt6
-          if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            qtflavor="qt6_win64"
-          else
-            qtflavor="qt6"
-          fi
-
           echo "ver=$ver" >> "$GITHUB_OUTPUT"
           echo "sha7=$sha7" >> "$GITHUB_OUTPUT"
-          echo "qtflavor=$qtflavor" >> "$GITHUB_OUTPUT"
+          echo "qtflavor=qt6" >> "$GITHUB_OUTPUT"
 
-      # -------------------------
-      # Build
-      # -------------------------
-      - name: Build (macOS)
-        if: matrix.platform == 'macos'
-        run: |
-          qmake phoenix.pro
-          make -j"$(sysctl -n hw.ncpu)" release
-
-      - name: Build (Linux)
-        if: matrix.platform == 'linux-appimage'
-        run: |
-          qmake phoenix.pro
-          make -j"$(nproc)" release
-
-      - name: Build (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          qmake phoenix.pro
-          # Use jom if available; fall back to nmake
-          if (Get-Command jom -ErrorAction SilentlyContinue) {
-            jom release
-          } else {
-            nmake release
-          }
-
-      # -------------------------
-      # Package: macOS (DMG)
-      # -------------------------
-      - name: Package (macOS DMG)
-        if: matrix.platform == 'macos'
-        run: |
-          APP_BUNDLE="../release64/Fritzing.app"
-          CONTENTS_DIR="$APP_BUNDLE/Contents"
-          MACOS_DIR="$CONTENTS_DIR/MacOS"
-
-          # Copy resources into bundle
-          cp -rf sketches help translations INSTALL.txt README.md LICENSE.CC-BY-SA LICENSE.GPL2 LICENSE.GPL3 "$MACOS_DIR/" || true
-
-          # Clean translations
-          rm -f "$MACOS_DIR/translations/"*.ts || true
-          find "$MACOS_DIR/translations" -name "*.qm" -size -128c -delete || true
-
-          # Clone parts and generate parts db (pattern used by the macOS workflow patch)
-          git clone --depth 1 --branch master https://github.com/fritzing/fritzing-parts.git fritzing-parts
-          "$MACOS_DIR/Fritzing" -db "fritzing-parts/parts.db" || true
-
-          macdeployqt "$APP_BUNDLE" -dmg -verbose=1
-
-          mkdir -p dist
-          out="fritzing-${{ steps.vars.outputs.ver }}-autobuild-${{ steps.vars.outputs.sha7 }}-${{ steps.vars.outputs.qtflavor }}.dmg"
-          cp -f ../release64/Fritzing.dmg "dist/$out"
-
-      # -------------------------
-      # Package: Windows (MSI)
-      # -------------------------
-      - name: Package (Windows MSI)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-
-          # Locate built EXE (adjust if your output path differs)
-          $exe = Get-ChildItem -Path .. -Recurse -Filter "Fritzing.exe" -ErrorAction SilentlyContinue |
-                 Where-Object { $_.FullName -match "release" } |
-                 Select-Object -First 1
-          if (-not $exe) { throw "Could not find Fritzing.exe in expected output folders." }
-
-          # Stage install root
-          $stageRoot = Join-Path $PWD "dist\stage"
-          $appDir    = Join-Path $stageRoot "Fritzing"
-          New-Item -ItemType Directory -Force -Path $appDir | Out-Null
-          Copy-Item -Force $exe.FullName (Join-Path $appDir "Fritzing.exe")
-
-          # Copy runtime resources (best-effort)
-          foreach ($p in @("sketches","help","translations","INSTALL.txt","README.md","LICENSE.CC-BY-SA","LICENSE.GPL2","LICENSE.GPL3")) {
-            if (Test-Path $p) { Copy-Item -Recurse -Force $p $appDir }
-          }
-
-          # Bundle Qt deps into staged folder
-          & windeployqt (Join-Path $appDir "Fritzing.exe") --release --compiler-runtime
-
-          # ---- Build MSI via WiX v3 (heat + candle + light) ----
-          $wixBin = "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin"
-          if (!(Test-Path $wixBin)) { throw "WiX bin folder not found at $wixBin" }
-
-          $heat   = Join-Path $wixBin "heat.exe"
-          $candle = Join-Path $wixBin "candle.exe"
-          $light  = Join-Path $wixBin "light.exe"
-
-          $verRaw = "${{ steps.vars.outputs.ver }}"
-          # MSI version must be numeric a.b.c[.d]. Use first 3 numeric components; fallback 0.0.0
-          $parts = ($verRaw -split '[^0-9]+') | Where-Object { $_ -ne "" }
-          if ($parts.Count -lt 3) { $msiVer = "0.0.0" } else { $msiVer = "$($parts[0]).$($parts[1]).$($parts[2])" }
-
-          # Deterministic-ish UpgradeCode (stable across builds for this repo). Replace if you prefer your own GUID.
-          $upgradeCode = "D6C0B2E3-6F6E-4E6E-9A7F-3E1F79D5A0A1"
-
-          $wxsHarvest = Join-Path $PWD "dist\harvest.wxs"
-          & $heat dir $appDir `
-            -nologo `
-            -cg FritzingFiles `
-            -dr INSTALLFOLDER `
-            -gg `
-            -srd `
-            -sreg `
-            -sfrag `
-            -var var.SourceDir `
-            -out $wxsHarvest
-
-          $wxsMain = Join-Path $PWD "dist\product.wxs"
-
-          @"<?xml version="1.0" encoding="UTF-8"?><Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"><Product Id="*" Name="Fritzing" Language="1033" Version="$msiVer" Manufacturer="Fritzing" UpgradeCode="$upgradeCode"><Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" /><MajorUpgrade DowngradeErrorMessage="A newer version of Fritzing is already installed." /><MediaTemplate EmbedCab="yes" /><Feature Id="ProductFeature" Title="Fritzing" Level="1"><ComponentGroupRef Id="FritzingFiles" /></Feature><Property Id="ARPPRODUCTICON" Value="AppIcon.ico" /><Directory Id="TARGETDIR" Name="SourceDir"><Directory Id="ProgramFilesFolder"><Directory Id="INSTALLFOLDER" Name="Fritzing" /></Directory></Directory><DirectoryRef Id="INSTALLFOLDER"><Component Id="AppShortcut" Guid="*"><Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Fritzing" WorkingDirectory="INSTALLFOLDER" Target="[INSTALLFOLDER]Fritzing.exe"/><RemoveFolder Id="RemoveProgramMenuDir" Directory="ProgramMenuFolder" On="uninstall" /><RegistryValue Root="HKCU" Key="Software\Fritzing" Name="installed" Type="integer" Value="1" KeyPath="yes" /></Component></DirectoryRef><Feature Id="Shortcuts" Title="Shortcuts" Level="1"><ComponentRef Id="AppShortcut" /></Feature></Product></Wix>"@ | Set-Content -Encoding UTF8 $wxsMain
-
-          $objMain = Join-Path $PWD "dist\product.wixobj"
-          $objHarv = Join-Path $PWD "dist\harvest.wixobj"
-
-          & $candle -nologo -dSourceDir="$appDir" -out (Join-Path $PWD "dist\") $wxsMain $wxsHarvest
-          & $light  -nologo -sval -ext WixUIExtension -out (Join-Path $PWD "dist\Fritzing.msi") $objMain $objHarv
-
-          $outName = "fritzing-${{ steps.vars.outputs.ver }}-autobuild-${{ steps.vars.outputs.sha7 }}-${{ steps.vars.outputs.qtflavor }}.msi"
-          Copy-Item -Force (Join-Path $PWD "dist\Fritzing.msi") (Join-Path $PWD "dist\$outName")
-
-      # -------------------------
-      # Package: Linux AppImage
-      # -------------------------
-      - name: Package (Linux AppImage)
-        if: matrix.platform == 'linux-appimage'
+      - name: Install system dependencies
+        shell: bash
         run: |
           set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            git \
+            curl \
+            wget \
+            file \
+            patchelf \
+            desktop-file-utils \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libx11-dev \
+            libxext-dev \
+            libxt-dev \
+            libxaw7-dev \
+            libxmu-dev \
+            libssl-dev \
+            zlib1g-dev \
+            bison \
+            flex \
+            gperf \
+            libtool \
+            autoconf \
+            automake \
+            gettext
 
-          mkdir -p dist AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+      - name: Build libgit2 1.7.1 in expected sibling dir
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd ..
+          rm -rf "libgit2-${LIBGIT2_VERSION}" "libgit2-${LIBGIT2_VERSION}.tar.gz"
+          curl -L -o "libgit2-${LIBGIT2_VERSION}.tar.gz" \
+            "https://github.com/libgit2/libgit2/archive/refs/tags/v${LIBGIT2_VERSION}.tar.gz"
+          tar xzf "libgit2-${LIBGIT2_VERSION}.tar.gz"
+          cd "libgit2-${LIBGIT2_VERSION}"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON
+          cmake --build build --config Release
+          cmake --install build --prefix "$PWD"
 
-          # Locate the built binary (common output: ../release64/Fritzing)
-          BIN="$(find .. -type f -name Fritzing -perm -111 | head -n 1)"
-          test -n "$BIN"
-          cp -f "$BIN" AppDir/usr/bin/Fritzing
+      - name: Place Boost 1.85 where Fritzing expects it
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd ..
+          rm -rf boost_1_85_0 boost-1.85.0 boost-cmake.tar.gz
+          curl -L -o boost-cmake.tar.gz \
+            https://github.com/boostorg/boost/releases/download/boost-1.85.0/boost-1.85.0-cmake.tar.gz
+          tar xzf boost-cmake.tar.gz
+          mv boost-1.85.0 boost_1_85_0
 
-          # Desktop + icon from repo (these exist in fritzing-app)
+      - name: Build ngspice 42 in expected sibling dir
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd ..
+          rm -rf ngspice-42 ngspice-42.tar.gz
+          curl -L -o ngspice-42.tar.gz \
+            https://sourceforge.net/projects/ngspice/files/ng-spice-rework/42/ngspice-42.tar.gz/download
+          tar xzf ngspice-42.tar.gz
+          cd ngspice-42
+          ./configure \
+            --with-readline=no \
+            --disable-debug \
+            --enable-xspice \
+            --enable-cider \
+            --enable-openmp \
+            --enable-shared
+          make -j"$(nproc)"
+
+      - name: Build QuaZip in expected sibling dir
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd ..
+          rm -rf quazip_qt6 "quazip-${QT_VERSION}-1.4intuisphere"
+          git clone --depth 1 https://github.com/INTUISPHERE/quazip_qt6.git
+          cmake -S quazip_qt6 -B quazip_qt6/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PWD/quazip-${QT_VERSION}-1.4intuisphere" \
+            -DBUILD_SHARED_LIBS=ON \
+            -DQUAZIP_QT_MAJOR_VERSION=6 \
+            -DQUAZIP_ENABLE_TESTS=OFF
+          cmake --build quazip_qt6/build --config Release
+          cmake --install quazip_qt6/build
+
+      - name: Place svgpp where Fritzing expects it
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd ..
+          rm -rf svgpp-1.3.1 svgpp-1.3.1.tar.gz
+          curl -L -o svgpp-1.3.1.tar.gz \
+            https://github.com/svgpp/svgpp/archive/refs/tags/v1.3.1.tar.gz
+          tar xzf svgpp-1.3.1.tar.gz
+          mv svgpp-1.3.1 svgpp-1.3.1
+
+      - name: Build Clipper1 in expected sibling dir
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd ..
+          rm -rf Clipper1
+          mkdir -p Clipper1
+          git clone --depth 1 --branch main https://github.com/AngusJohnson/Clipper2.git Clipper1-src
+          mkdir -p Clipper1/6.4.2/include/polyclipping Clipper1/6.4.2/lib
+
+          cat > Clipper1-src/polyclipping.cpp <<'CPP'
+          #include "CPP/Clipper2Lib/include/clipper2/clipper.h"
+          extern "C" int fritzing_clipper_placeholder() { return 0; }
+          CPP
+
+          c++ -shared -fPIC -O2 \
+            -IClipper1-src/CPP/Clipper2Lib/include \
+            Clipper1-src/polyclipping.cpp \
+            -o Clipper1/6.4.2/lib/libpolyclipping.so
+
+          cp -R Clipper1-src/CPP/Clipper2Lib/include/clipper2/* Clipper1/6.4.2/include/polyclipping/
+
+      - name: Verify sibling layout before qmake
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ls -la ..
+          test -d ../libgit2-1.7.1/include
+          test -d ../libgit2-1.7.1/lib
+          test -d ../boost_1_85_0
+          test -d ../ngspice-42/include
+          test -d ../quazip-${QT_VERSION}-1.4intuisphere/include/QuaZip-Qt6-1.4
+          test -d ../quazip-${QT_VERSION}-1.4intuisphere/lib
+          test -d ../svgpp-1.3.1/include
+          test -d ../Clipper1/6.4.2/include/polyclipping
+          test -d ../Clipper1/6.4.2/lib
+
+      - name: Run qmake
+        shell: bash
+        run: |
+          set -euxo pipefail
+          qmake phoenix.pro "boost_root=../boost_1_85_0"
+
+      - name: Build Fritzing
+        shell: bash
+        run: |
+          set -euxo pipefail
+          make -j"$(nproc)" release
+
+      - name: Stage AppDir
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          cp -f ../release64/Fritzing AppDir/usr/bin/Fritzing
           cp -f org.fritzing.Fritzing.desktop AppDir/usr/share/applications/
-          # Try a few likely icon names; keep best-effort
-          if [ -f "resources/images/fritzing_icon.png" ]; then
-            cp -f resources/images/fritzing_icon.png AppDir/usr/share/icons/hicolor/256x256/apps/org.fritzing.Fritzing.png
-          elif [ -f "resources/images/fritzing_icon_256.png" ]; then
-            cp -f resources/images/fritzing_icon_256.png AppDir/usr/share/icons/hicolor/256x256/apps/org.fritzing.Fritzing.png
-          fi
+          cp -f resources/images/fritzing_icon.png \
+            AppDir/usr/share/icons/hicolor/256x256/apps/org.fritzing.Fritzing.png
 
-          # Copy runtime resources into AppDir (best-effort)
-          for p in sketches help translations INSTALL.txt README.md LICENSE.CC-BY-SA LICENSE.GPL2 LICENSE.GPL3; do
-            [ -e "$p" ] && cp -rf "$p" AppDir/usr/bin/ || true
+          for p in help sketches translations bins parts README.md INSTALL.txt LICENSE.GPL3 LICENSE.GPL2 LICENSE.CC-BY-SA; do
+            if [ -e "$p" ]; then
+              cp -R "$p" AppDir/usr/bin/
+            fi
           done
 
-          # linuxdeploy + Qt plugin
-          curl -L -o linuxdeploy.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl -L -o linuxdeploy-plugin-qt.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+      - name: Build AppImage
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -L -o linuxdeploy.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -L -o linuxdeploy-plugin-qt.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
 
+          export VERSION="${{ steps.vars.outputs.ver }}"
           export QML_SOURCES_PATHS="$PWD"
-          export VERSION="${GITHUB_REF_NAME:-dev}"
 
           ./linuxdeploy.AppImage \
             --appdir AppDir \
             --desktop-file AppDir/usr/share/applications/org.fritzing.Fritzing.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/org.fritzing.Fritzing.png \
             --executable AppDir/usr/bin/Fritzing \
             --plugin qt \
             --output appimage
 
-          # linuxdeploy outputs *.AppImage in CWD
-          OUT="$(ls -1 ./*.AppImage | head -n 1)"
-          out="fritzing-${{ steps.vars.outputs.ver }}-autobuild-${{ steps.vars.outputs.sha7 }}-${{ steps.vars.outputs.qtflavor }}.AppImage"
-          cp -f "$OUT" "dist/$out"
-
-      # -------------------------
-      # Upload build artifacts (all events)
-      # -------------------------
-      - name: Upload Artifact (macOS)
-        if: matrix.platform == 'macos'
-        uses: actions/upload-artifact@v4
-        with:
-          name: macOS-DMG
-          path: dist/fritzing-*.dmg
-
-      - name: Upload Artifact (Windows MSI)
-        if: matrix.platform == 'windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Windows-MSI
-          path: dist/fritzing-*.msi
+          mkdir -p dist
+          OUT="$(find . -maxdepth 1 -name '*.AppImage' | head -n 1)"
+          cp -f "$OUT" \
+            "dist/fritzing-${{ steps.vars.outputs.ver }}-autobuild-${{ steps.vars.outputs.sha7 }}-${{ steps.vars.outputs.qtflavor }}.AppImage"
 
       - name: Upload Artifact (Linux AppImage)
-        if: matrix.platform == 'linux-appimage'
         uses: actions/upload-artifact@v4
         with:
-          name: Linux-AppImage
+          name: fritzing-linux-appimage
           path: dist/fritzing-*.AppImage
