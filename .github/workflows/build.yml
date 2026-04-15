@@ -119,8 +119,9 @@ jobs:
           set -euxo pipefail
           cd ..
           rm -rf ngspice-42 ngspice-42.tar.gz
-          curl -L -o ngspice-42.tar.gz \
-            https://sourceforge.net/projects/ngspice/files/ng-spice-rework/42/ngspice-42.tar.gz/download
+          wget --content-disposition -O ngspice-42.tar.gz \
+            "https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/old-releases/42/ngspice-42.tar.gz"
+          file ngspice-42.tar.gz
           tar xzf ngspice-42.tar.gz
           cd ngspice-42
           ./configure \
