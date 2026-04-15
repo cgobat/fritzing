@@ -155,10 +155,8 @@ jobs:
           set -euxo pipefail
           cd ..
           rm -rf svgpp-1.3.1 svgpp-1.3.1.tar.gz
-          curl -L -o svgpp-1.3.1.tar.gz \
-            https://github.com/svgpp/svgpp/archive/refs/tags/v1.3.1.tar.gz
+          curl -L -o svgpp-1.3.1.tar.gz https://github.com/svgpp/svgpp/archive/refs/tags/v1.3.1.tar.gz
           tar xzf svgpp-1.3.1.tar.gz
-          mv svgpp-1.3.1 svgpp-1.3.1
 
       - name: Build Clipper1 in expected sibling dir
         shell: bash
