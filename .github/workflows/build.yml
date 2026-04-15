@@ -229,7 +229,10 @@ jobs:
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          cp -f ../release64/Fritzing AppDir/usr/bin/Fritzing
+
+          test -f Fritzing
+          cp -f Fritzing AppDir/usr/bin/Fritzing
+
           cp -f org.fritzing.Fritzing.desktop AppDir/usr/share/applications/
           cp -f resources/images/fritzing_icon.png \
             AppDir/usr/share/icons/hicolor/256x256/apps/org.fritzing.Fritzing.png
