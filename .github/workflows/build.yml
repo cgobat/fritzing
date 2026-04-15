@@ -108,11 +108,14 @@ jobs:
         run: |
           set -euxo pipefail
           cd ..
-          rm -rf boost_1_85_0 boost-1.85.0 boost-cmake.tar.gz
-          curl -L -o boost-cmake.tar.gz \
-            https://github.com/boostorg/boost/releases/download/boost-1.85.0/boost-1.85.0-cmake.tar.gz
-          tar xzf boost-cmake.tar.gz
-          mv boost-1.85.0 boost_1_85_0
+          rm -rf boost_1_85_0 boost_1_85_0.tar.bz2
+
+          wget -O boost_1_85_0.tar.bz2 \
+            "https://archives.boost.io/release/1.85.0/source/boost_1_85_0.tar.bz2"
+
+          tar xjf boost_1_85_0.tar.bz2
+
+          test -f boost_1_85_0/boost/math/special_functions/relative_difference.hpp
 
       - name: Build ngspice 42 in expected sibling dir
         shell: bash
