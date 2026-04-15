@@ -34,6 +34,7 @@ jobs:
           host: linux
           target: desktop
           arch: gcc_64
+          modules: qtserialport
           cache: true
 
       - name: Compute artifact naming vars
