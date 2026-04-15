@@ -122,10 +122,10 @@ jobs:
           rm -rf ngspice-42 ngspice-42.tar.gz
           wget --content-disposition -O ngspice-42.tar.gz \
             "https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/old-releases/42/ngspice-42.tar.gz"
-          file ngspice-42.tar.gz
           tar xzf ngspice-42.tar.gz
           cd ngspice-42
           ./configure \
+            --prefix="$PWD" \
             --with-readline=no \
             --disable-debug \
             --enable-xspice \
@@ -133,6 +133,11 @@ jobs:
             --enable-openmp \
             --enable-shared
           make -j"$(nproc)"
+          make install
+          if [ ! -f include/ngspice/sharedspice.h ]; then
+            mkdir -p include
+            cp -R src/include/ngspice include/
+          fi
 
       - name: Build QuaZip in expected sibling dir
         shell: bash
