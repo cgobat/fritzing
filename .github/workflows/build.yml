@@ -164,27 +164,33 @@ jobs:
           curl -L -o svgpp-1.3.1.tar.gz https://github.com/svgpp/svgpp/archive/refs/tags/v1.3.1.tar.gz
           tar xzf svgpp-1.3.1.tar.gz
 
-      - name: Build Clipper1 in expected sibling dir
+      - name: Build Clipper1 6.4.2 in expected sibling dir
         shell: bash
         run: |
           set -euxo pipefail
           cd ..
-          rm -rf Clipper1
+          rm -rf Clipper1 clipper_ver6.4.2.zip clipper-6.4.2-src
           mkdir -p Clipper1
-          git clone --depth 1 --branch main https://github.com/AngusJohnson/Clipper2.git Clipper1-src
-          mkdir -p Clipper1/6.4.2/include/polyclipping Clipper1/6.4.2/lib
 
-          cat > Clipper1-src/polyclipping.cpp <<'CPP'
-          #include "CPP/Clipper2Lib/include/clipper2/clipper.h"
-          extern "C" int fritzing_clipper_placeholder() { return 0; }
-          CPP
+          wget -O clipper_ver6.4.2.zip \
+            "https://downloads.sourceforge.net/project/polyclipping/clipper_ver6.4.2.zip"
+
+          unzip -q clipper_ver6.4.2.zip -d clipper-6.4.2-src
+
+          mkdir -p Clipper1/6.4.2/include/polyclipping
+          mkdir -p Clipper1/6.4.2/lib
+
+          # The archive contains the canonical Clipper 6.4.2 header/source.
+          cp clipper-6.4.2-src/cpp/clipper.hpp Clipper1/6.4.2/include/polyclipping/
+          cp clipper-6.4.2-src/cpp/clipper.cpp Clipper1/6.4.2/
 
           c++ -shared -fPIC -O2 \
-            -IClipper1-src/CPP/Clipper2Lib/include \
-            Clipper1-src/polyclipping.cpp \
+            -IClipper1/6.4.2/include/polyclipping \
+            Clipper1/6.4.2/clipper.cpp \
             -o Clipper1/6.4.2/lib/libpolyclipping.so
 
-          cp -R Clipper1-src/CPP/Clipper2Lib/include/clipper2/* Clipper1/6.4.2/include/polyclipping/
+          test -f Clipper1/6.4.2/include/polyclipping/clipper.hpp
+          test -f Clipper1/6.4.2/lib/libpolyclipping.so
 
       - name: Verify sibling layout before qmake
         shell: bash
