@@ -199,7 +199,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          qmake phoenix.pro "boost_root=../boost_1_85_0"
+          qmake phoenix.pro "boost_root=$PWD/../boost_1_85_0"
 
       - name: Build Fritzing
         shell: bash
