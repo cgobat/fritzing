@@ -255,6 +255,13 @@ jobs:
             fi
           done
 
+      - name: Generate parts database
+        shell: bash
+        run: |
+          set -euxo pipefail
+          QT_QPA_PLATFORM=offscreen \
+            AppDir/usr/bin/Fritzing -db AppDir/usr/bin/parts.db || true
+
       - name: Build AppImage
         shell: bash
         run: |
