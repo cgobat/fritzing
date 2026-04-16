@@ -235,7 +235,7 @@ jobs:
 
           cp -f org.fritzing.Fritzing.desktop AppDir/usr/share/applications/
           cp -f resources/images/fritzing_icon.png \
-            AppDir/usr/share/icons/hicolor/256x256/apps/org.fritzing.Fritzing.png
+            AppDir/usr/share/icons/hicolor/256x256/apps/fritzing.png
 
           for p in help sketches translations bins parts README.md INSTALL.txt LICENSE.GPL3 LICENSE.GPL2 LICENSE.CC-BY-SA; do
             if [ -e "$p" ]; then
@@ -259,7 +259,7 @@ jobs:
           ./linuxdeploy.AppImage \
             --appdir AppDir \
             --desktop-file AppDir/usr/share/applications/org.fritzing.Fritzing.desktop \
-            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/org.fritzing.Fritzing.png \
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/fritzing.png \
             --executable AppDir/usr/bin/Fritzing \
             --plugin qt \
             --output appimage
