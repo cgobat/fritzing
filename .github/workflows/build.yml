@@ -222,6 +222,13 @@ jobs:
           set -euxo pipefail
           make -j"$(nproc)" release
 
+      - name: Clone fritzing-parts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf fritzing-parts
+          git clone --depth 1 --branch develop https://github.com/fritzing/fritzing-parts.git
+
       - name: Stage AppDir
         shell: bash
         run: |
@@ -230,7 +237,6 @@ jobs:
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
 
-          test -f Fritzing
           cp -f Fritzing AppDir/usr/bin/Fritzing
 
           cp -f org.fritzing.Fritzing.desktop AppDir/usr/share/applications/
@@ -240,6 +246,12 @@ jobs:
           for p in help sketches translations bins parts README.md INSTALL.txt LICENSE.GPL3 LICENSE.GPL2 LICENSE.CC-BY-SA; do
             if [ -e "$p" ]; then
               cp -R "$p" AppDir/usr/bin/
+            fi
+          done
+
+          for p in bins parts svg user; do
+            if [ -e "fritzing-parts/$p" ]; then
+              cp -R "fritzing-parts/$p" AppDir/usr/bin/
             fi
           done
 
