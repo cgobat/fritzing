@@ -249,18 +249,26 @@ jobs:
             fi
           done
 
-          for p in bins parts svg user; do
-            if [ -e "fritzing-parts/$p" ]; then
-              cp -R "fritzing-parts/$p" AppDir/usr/bin/
-            fi
-          done
+          rm -rf AppDir/usr/bin/parts
+          cp -R fritzing-parts AppDir/usr/bin/parts
 
       - name: Generate parts database
         shell: bash
         run: |
           set -euxo pipefail
           QT_QPA_PLATFORM=offscreen \
-            AppDir/usr/bin/Fritzing -db AppDir/usr/bin/parts.db || true
+            AppDir/usr/bin/Fritzing -db AppDir/usr/bin/parts/parts.db
+
+      - name: Create AppRun wrapper
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat > AppDir/AppRun <<'SH'
+          #!/bin/sh
+          HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+          exec "$HERE/Fritzing.bin" "$@"
+          SH
+          chmod +x AppDir/AppRun
 
       - name: Build AppImage
         shell: bash
